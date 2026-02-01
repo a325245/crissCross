@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Magic Crossword</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        /* This section makes it look nice on mobile */
+        body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; background: #f0f0f0; }
+        .container { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        input, button { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 5px; }
+        button { background-color: #007bff; color: white; font-weight: bold; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        #result-area { margin-top: 20px; }
+        
+        /* Styles for the crossword grid that Gemini will generate */
+        table { border-collapse: collapse; margin: 0 auto; }
+        td { width: 30px; height: 30px; border: 1px solid black; text-align: left; vertical-align: top; font-size: 10px; position: relative; }
+        .black-cell { background-color: black; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>📸 Crossword Converter</h2>
+    
+    <label>Paste your API Key here:</label>
+    <input type="password" id="apiKey" placeholder="AIzaSy...">
+
+    <label>Upload Crossword Photo:</label>
+    <input type="file" id="imageInput" accept="image/*">
+
+    <button onclick="convertCrossword()">✨ Convert to Digital</button>
+
+    <div id="status"></div>
+    <div id="result-area"></div>
+</div>
+
+<script>
+    async function convertCrossword() {
+        const apiKey = document.getElementById('apiKey').value;
+        const fileInput = document.getElementById('imageInput');
+        const status = document.getElementById('status');
+        const resultArea = document.getElementById('result-area');
+
+        if (!apiKey || fileInput.files.length === 0) {
+            alert("Please provide both an API Key and a photo!");
+            return;
+        }
+
+        status.innerHTML = "⏳ Scanning image... (This takes about 10 seconds)";
+        resultArea.innerHTML = "";
+
+        // 1. Prepare the image file for Gemini
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+        
+        reader.onloadend = async function() {
+            const base64Image = reader.result.split(',')[1];
+
+            // 2. The Prompt: We ask Gemini to write the HTML for the grid
+            const prompt = `
+                Look at this crossword image. I want you to create a playable HTML version of it.
+                1. Create an HTML <table> representing the grid. 
+                2. For black squares, give the cell a class of "black-cell".
+                3. For white squares, if there is a small number in the corner, write just that number.
+                4. Below the table, create two lists (<ul>) for "Across" and "Down" clues.
+                5. Do NOT write any markdown, explanations, or code blocks (like \`\`\`). Just return the raw HTML code.
+            `;
+
+            // 3. Send to Gemini
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [
+                                { text: prompt },
+                                { inline_data: { mime_type: file.type, data: base64Image } }
+                            ]
+                        }]
+                    })
+                });
+
+                const data = await response.json();
+                
+                // 4. Display the result
+                const aiText = data.candidates[0].content.parts[0].text;
+                resultArea.innerHTML = aiText;
+                status.innerHTML = "✅ Done!";
+
+            } catch (error) {
+                status.innerHTML = "❌ Error: " + error.message;
+            }
+        };
+
+        reader.readAsDataURL(file);
+    }
+</script>
+
+</body>
+</html>
