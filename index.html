@@ -1,12 +1,15 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Magic Crossword (v2.0)</title>
+    <title>Magic Crossword (v2.1)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { font-family: sans-serif; max-width: 600px; margin: 0 auto; background: #f4f4f9; padding: 10px; }
+        body { font-family: sans-serif; max-width: 600px; margin: 0 auto; background: #f4f4f9; padding: 10px; padding-bottom: 80px; }
         .container { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         h2 { text-align: center; color: #333; margin-top: 0; }
+
+        /* Version Header */
+        .version-badge { background: #eee; color: #555; padding: 5px 10px; border-radius: 4px; font-size: 0.8em; margin-bottom: 15px; display: inline-block; }
 
         /* Controls */
         .controls input, .controls select, .controls button { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
@@ -17,38 +20,39 @@
         #active-clue-bar { 
             position: fixed; bottom: 0; left: 0; right: 0; 
             background: #222; color: #fff; padding: 15px; 
-            text-align: center; font-size: 1.1em; z-index: 100;
-            border-top: 4px solid #007bff; display: none;
+            text-align: center; font-size: 1em; z-index: 100;
+            border-top: 4px solid #007bff; display: none; box-shadow: 0 -2px 10px rgba(0,0,0,0.3);
         }
 
         /* The Grid */
-        #game-board { margin-top: 20px; overflow-x: auto; padding-bottom: 60px; }
+        #game-board { margin-top: 20px; overflow-x: auto; }
+        
+        /* AI Generated Table Styles */
         table { border-collapse: collapse; margin: 0 auto; background: #000; border: 2px solid #000; }
         td { 
-            width: 34px; height: 34px; 
+            width: 36px; height: 36px; 
             border: 1px solid #555; 
             background: white; 
             position: relative; 
             padding: 0;
         }
+        td.black-cell { background-color: #222; }
         
-        /* Black Squares */
-        td.black { background-color: #222; }
-
-        /* The Input Box */
+        /* The Inputs inside the grid */
         td input { 
             width: 100%; height: 100%; border: none; 
-            text-align: center; font-size: 18px; 
+            text-align: center; font-size: 20px; 
             text-transform: uppercase; font-weight: bold; 
             background: transparent; padding: 0; margin: 0; 
-            color: #333; border-radius: 0;
+            color: #333; border-radius: 0; 
+            z-index: 2; position: relative;
         }
         td input:focus { background-color: #fff9c4; outline: none; }
 
         /* The Tiny Numbers */
-        .cell-number { 
-            position: absolute; top: 1px; left: 1px; 
-            font-size: 9px; color: #666; pointer-events: none; line-height: 1;
+        .num { 
+            position: absolute; top: 1px; left: 2px; 
+            font-size: 10px; color: #666; pointer-events: none; z-index: 1; font-weight: bold;
         }
     </style>
 </head>
@@ -56,6 +60,9 @@
 
 <div class="container">
     <h2>🧩 Playable Crossword</h2>
+    <div class="version-badge">
+        <b>v2.1 Changelog:</b> Reverted to HTML Grid (Better visuals), Fixed Clue Logic.
+    </div>
     
     <div class="controls" id="setup-panel">
         <label>API Key:</label>
@@ -63,8 +70,8 @@
         
         <label>Model:</label>
         <select id="modelSelect">
-            <option value="gemini-2.5-flash">Gemini 2.5 Flash (Best)</option>
-            <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash (Fast & Stable)</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash (Smarter)</option>
         </select>
 
         <label>Photo:</label>
@@ -80,101 +87,84 @@
 <div id="active-clue-bar">Tap a square to see the clue!</div>
 
 <script>
-    // --- 1. THE GAME ENGINE (Handles the logic) ---
-    let puzzleData = null;
-
-    function renderGame(data) {
-        puzzleData = data;
-        const board = document.getElementById('game-board');
-        const setup = document.getElementById('setup-panel');
-        const clueBar = document.getElementById('active-clue-bar');
+    // --- 1. THE GAME LOGIC (Finds clues by walking backwards) ---
+    
+    function attachGameLogic() {
+        const inputs = document.querySelectorAll('td input');
         
-        setup.style.display = 'none'; // Hide setup
-        clueBar.style.display = 'block'; // Show clue bar
-        board.innerHTML = '';
-
-        const table = document.createElement('table');
-
-        // Build the grid
-        data.grid.forEach((row, rIndex) => {
-            const tr = document.createElement('tr');
-            row.forEach((cell, cIndex) => {
-                const td = document.createElement('td');
-                
-                if (cell === '#') {
-                    td.className = 'black';
-                } else {
-                    // Create input for letter
-                    const input = document.createElement('input');
-                    input.maxLength = 1;
-                    input.dataset.row = rIndex;
-                    input.dataset.col = cIndex;
-                    
-                    // Add interactions
-                    input.onfocus = () => showClue(rIndex, cIndex);
-                    input.oninput = (e) => {
-                        // Auto-move to next box if typing a letter
-                        if(e.target.value) moveFocus(rIndex, cIndex + 1); 
-                    };
-
-                    // Render small number if it exists
-                    if (typeof cell === 'number') {
-                        const numSpan = document.createElement('span');
-                        numSpan.className = 'cell-number';
-                        numSpan.innerText = cell;
-                        td.appendChild(numSpan);
+        inputs.forEach(input => {
+            input.onfocus = (e) => showClue(e.target);
+            
+            // Auto-move focus on type
+            input.oninput = (e) => {
+                if(e.target.value.length === 1) {
+                    // Try to move right one cell (simple heuristic)
+                    const parentTd = e.target.parentElement;
+                    const nextTd = parentTd.nextElementSibling;
+                    if(nextTd && nextTd.querySelector('input')) {
+                        nextTd.querySelector('input').focus();
                     }
-                    td.appendChild(input);
                 }
-                tr.appendChild(td);
-            });
-            table.appendChild(tr);
+            };
         });
-        board.appendChild(table);
     }
 
-    function showClue(row, col) {
-        // Logic: Find the "Across" number by walking left until we hit a black square
-        let startCol = col;
-        while (startCol > 0 && puzzleData.grid[row][startCol - 1] !== '#') {
-            startCol--;
+    function showClue(activeInput) {
+        const cell = activeInput.parentElement;
+        const row = cell.parentElement;
+        const table = row.parentElement;
+
+        // 1. Find ACROSS Clue: Walk LEFT until we hit a black square or edge
+        let currentTd = cell;
+        let acrossClue = "---";
+        while (currentTd) {
+            // Check if this cell has the "data-across" attribute stored on its input
+            const inp = currentTd.querySelector('input');
+            if (inp && inp.dataset.across) {
+                acrossClue = inp.dataset.across;
+                break; 
+            }
+            if (currentTd.classList.contains('black-cell') || !currentTd.previousElementSibling) break;
+            currentTd = currentTd.previousElementSibling;
         }
+
+        // 2. Find DOWN Clue: Walk UP until we hit a black square or edge
+        let currentRow = row;
+        let colIndex = Array.from(row.children).indexOf(cell);
+        let downClue = "---";
         
-        // Logic: Find the "Down" number by walking up
-        let startRow = row;
-        while (startRow > 0 && puzzleData.grid[startRow - 1][col] !== '#') {
-            startRow--;
+        while (currentRow) {
+            const tdAbove = currentRow.children[colIndex];
+            const inp = tdAbove ? tdAbove.querySelector('input') : null;
+            
+            if (inp && inp.dataset.down) {
+                downClue = inp.dataset.down;
+                break;
+            }
+            // Stop if we hit top or black cell
+            if (!tdAbove || tdAbove.classList.contains('black-cell') || !currentRow.previousElementSibling) break;
+            currentRow = currentRow.previousElementSibling;
         }
 
-        // Get the clue numbers from those start positions
-        const acrossNum = puzzleData.grid[row][startCol];
-        const downNum = puzzleData.grid[startRow][col];
-
-        // Fetch text
-        const acrossText = puzzleData.clues.across[acrossNum] || "(No Across Clue)";
-        const downText = puzzleData.clues.down[downNum] || "(No Down Clue)";
-
-        // Update the sticky bar
-        document.getElementById('active-clue-bar').innerHTML = 
-            `<b>A:</b> ${acrossText} <span style='color:#555'>|</span> <b>D:</b> ${downText}`;
+        // Display
+        const clueBar = document.getElementById('active-clue-bar');
+        clueBar.style.display = 'block';
+        clueBar.innerHTML = `<b>A:</b> ${acrossClue}<br><b>D:</b> ${downClue}`;
     }
 
-    function moveFocus(r, c) {
-        // Simple helper to jump to next input
-        const nextInput = document.querySelector(`input[data-row='${r}'][data-col='${c}']`);
-        if (nextInput) nextInput.focus();
-    }
 
-    // --- 2. THE AI CALL (Fetches the data) ---
+    // --- 2. THE AI CALL ---
     async function convertCrossword() {
         const apiKey = document.getElementById('apiKey').value;
         const model = document.getElementById('modelSelect').value;
         const fileInput = document.getElementById('imageInput');
         const status = document.getElementById('status');
+        const board = document.getElementById('game-board');
 
         if (!apiKey || fileInput.files.length === 0) return alert("Missing Key or Photo");
 
-        status.innerHTML = "🧠 Analyzing grid structure... (This is harder than just reading!)";
+        status.innerHTML = "🧠 Analyzing image... (Generating Smart HTML)";
+        board.innerHTML = "";
 
         const file = fileInput.files[0];
         const reader = new FileReader();
@@ -182,21 +172,22 @@
         reader.onloadend = async function() {
             const base64Image = reader.result.split(',')[1];
             
-            // We ask for JSON specifically
+            // THE MAGIC PROMPT (Version 2.1)
+            // We ask for HTML (for looks) but with data-attributes (for logic)
             const prompt = `
-                Analyze this crossword image. Output ONLY a valid JSON object.
-                Structure:
-                {
-                    "grid": [ ["#", 1, 2, "#"], [3, ".", ".", 4] ], 
-                    "clues": { 
-                        "across": { "1": "Clue text", "3": "Clue text" },
-                        "down": { "2": "Clue text" }
-                    }
-                }
+                Look at this crossword. Generate the HTML code for a playable version.
+                
                 Rules:
-                1. "grid": 2D array. Use '#' for black squares. Use the integer number for squares that start a word. Use "." (string dot) for empty white squares.
-                2. "clues": Object mapping the number to the text.
-                3. Do NOT include markdown formatting. Return raw JSON only.
+                1. Create a standard HTML <table>.
+                2. Black squares: <td class="black-cell"></td>
+                3. White squares: <td><input maxlength="1"></td>
+                
+                CRITICAL DATA INJECTION:
+                4. If a white square has a small number (e.g., 5), add a <span class="num">5</span> inside the td.
+                5. ALSO, if that square starts a word, add the CLUE TEXT to the input as a data attribute.
+                   Example: <input data-across="5. A baked treat" data-down="5. To move quickly">
+                
+                6. Do not wrap in markdown or '''html code blocks. Just return the raw table HTML.
             `;
 
             try {
@@ -216,17 +207,24 @@
                 const data = await response.json();
                 
                 if (data.error) throw new Error(data.error.message);
+                if (!data.candidates) throw new Error("AI returned no content");
+
+                let html = data.candidates[0].content.parts[0].text;
                 
-                let jsonText = data.candidates[0].content.parts[0].text;
-                // Clean up if AI adds markdown blocks
-                jsonText = jsonText.replace(/```json|```/g, '').trim();
+                // Cleanup markdown if the AI was naughty
+                html = html.replace(/```html|```/g, '');
+
+                board.innerHTML = html;
+                document.getElementById('setup-panel').style.display = 'none'; // Hide controls to focus on game
                 
-                const puzzle = JSON.parse(jsonText);
-                renderGame(puzzle);
-                status.innerHTML = "";
+                // Activate the JavaScript logic on the new inputs
+                attachGameLogic();
+                
+                status.innerHTML = "✅ Game Ready!";
 
             } catch (error) {
                 status.innerHTML = "❌ Error: " + error.message;
+                document.getElementById('setup-panel').style.display = 'block';
             }
         };
         reader.readAsDataURL(file);
